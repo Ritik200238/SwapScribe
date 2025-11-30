@@ -1,0 +1,145 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Merchant {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  settings     MerchantSettings?
+  plans        Plan[]
+  subscribers  Subscriber[]
+
+  @@map("merchants")
+}
+
+model MerchantSettings {
+  id            String   @id @default(cuid())
+  merchantId    String   @unique
+  merchant      Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  displayName   String
+  logoUrl       String?
+  primaryColor  String   @default("#6366f1")
+  settleAddress String   // Merchant's payout wallet address
+  settleCoin    String   @default("usdc") // Default payout coin
+  settleNetwork String   @default("ethereum") // Default payout network
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("merchant_settings")
+}
+
+model Plan {
+  id             String   @id @default(cuid())
+  merchantId     String
+  merchant       Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  name           String
+  description    String?
+  priceUsd       Float    // Price in USD
+  billingInterval String  // "monthly" or "yearly"
+  settleCoin     String   // e.g., "usdc"
+  settleNetwork  String   // e.g., "ethereum"
+  publicSlug     String   @unique // For /subscribe/:slug
+  isActive       Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@index([merchantId])
+  @@map("plans")
+}
+
+model Subscriber {
+  id         String   @id @default(cuid())
+  email      String
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  subscriptions Subscription[]
+
+  @@unique([email, merchantId])
+  @@index([merchantId])
+  @@map("subscribers")
+}
+
+model Subscription {
+  id                String   @id @default(cuid())
+  subscriberId      String
+  subscriber        Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  planId            String
+  plan              Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  status            String   // "active", "past_due", "canceled"
+  currentPeriodEnd  DateTime?
+  canceledAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoices Invoice[]
+
+  @@unique([subscriberId, planId])
+  @@index([planId])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  amountUsd       Float
+  settleCoin      String
+  settleNetwork   String
+  depositCoin     String?
+  depositNetwork  String?
+
+  sideShiftShiftId String?  // SideShift shift ID
+  depositAddress   String?  // Where user sends payment
+  depositMemo      String?  // Memo if required
+  depositMin       String?
+  depositMax       String?
+
+  status      String   // "draft", "pending_payment", "paid", "expired", "failed"
+  dueAt       DateTime
+  paidAt      DateTime?
+  expiresAt   DateTime? // When the shift expires
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([subscriptionId])
+  @@index([status])
+  @@map("invoices")
+}
+
+// Rate limiting for public API endpoints
+model RateLimit {
+  id        String   @id @default(cuid())
+  ip        String
+  action    String   // e.g., "create_invoice"
+  createdAt DateTime @default(now())
+
+  @@index([ip, action, createdAt])
+  @@map("rate_limits")
+}
